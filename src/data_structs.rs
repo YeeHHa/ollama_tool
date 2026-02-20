@@ -53,3 +53,30 @@ impl Detail {
         println!("Quantization Level: {}", self.quantization_level);
     }
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Chat {
+    pub model: str,
+    pub messages: Vec<Message>,
+    pub tools: Vec<Tool>,
+    pub think: Option<bool>,
+    pub stream: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Message {
+    pub role: str,
+    pub content: str,
+    pub thinking: Option<bool>,
+    pub images: Option<Vec<String>>,
+    pub tool_calls: Option<Vec<Tool>>,
+    pub tool_name: Option<Tool>
+
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Tool {
+    pub name: str
+}
+
+
