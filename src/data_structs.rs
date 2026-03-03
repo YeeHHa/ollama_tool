@@ -58,7 +58,7 @@ impl Detail {
 pub struct Chat {
     pub model: String,
     pub messages: Vec<Message>,
-    pub tools: Vec<Tool>,
+    pub tools: Option<Vec<Tool>>,
     pub think: Option<bool>,
     pub stream: bool,
 }
@@ -70,7 +70,6 @@ pub struct Message {
     pub thinking: Option<bool>,
     pub images: Option<Vec<String>>,
     pub tool_calls: Option<Vec<Tool>>,
-    pub tool_name: Option<Tool>
 
 }
 
@@ -79,4 +78,35 @@ pub struct Tool {
     pub name: String 
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ChatResponse {
+    pub model: String,
+    pub created_at: String,
+    pub message: Message,
+    pub done_reason: Option<String>,
+    pub done: bool,
+    pub total_duration: Option<u64>,
+    pub load_duration: Option<u64>,
+    pub prompt_eval_count: Option<u64>,
+    pub prompt_eval_duration: Option<u64>,
+    pub eval_count: Option<u64>,
+    pub eval_duration: Option<u64>,
+    pub logprobs: Option<LogProbs>,
+}
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LogProbs {
+    pub tokens: Option<String>,
+    pub logprobs: Option<Vec<f64>>,
+    pub bytes: Option<Vec<u8>>,
+    pub top_logprobs: Option<Vec<TopLogProb>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TopLogProb {
+    pub token: String,
+    pub logprob: f64,
+    pub bytes: Vec<u8>,
+}
 
