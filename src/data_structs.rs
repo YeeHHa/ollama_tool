@@ -56,7 +56,7 @@ impl Detail {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Chat {
-    pub model: str,
+    pub model: String,
     pub messages: Vec<Message>,
     pub tools: Vec<Tool>,
     pub think: Option<bool>,
@@ -65,8 +65,8 @@ pub struct Chat {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Message {
-    pub role: str,
-    pub content: str,
+    pub role: String,
+    pub content: String,
     pub thinking: Option<bool>,
     pub images: Option<Vec<String>>,
     pub tool_calls: Option<Vec<Tool>>,
@@ -76,7 +76,7 @@ pub struct Message {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Tool {
-    pub name: str
+    pub name: String 
 }
 
 

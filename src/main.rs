@@ -10,6 +10,7 @@ mod data_structs;
 
 
 fn ollama_url() -> String {
+
     "http://localhost:11434".to_string()
 }
 
