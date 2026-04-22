@@ -42,6 +42,7 @@ async fn main() {
         2 => {
             let flag = &args[1];
             match flag.as_str() {
+                "-h" => help_message(),
                 "-r" => get_running_models().await,
                 "-l" => list_available_models().await,
                 "-c" => {
@@ -191,7 +192,7 @@ async fn chat(prompt: String) {
     };
 
     current_chat.messages.push(new_message);
-
+    log::info!("sending request to ollama server");
     let response = reqwest::Client::new()
         .post(&endpoint)
         .json(&current_chat)
@@ -211,6 +212,7 @@ async fn chat(prompt: String) {
                     }
                 };
                 log::debug!("Chat response received: {:?}", chat_response.message);
+                log::info!("{}", chat_response.message.content);
                 current_chat.messages.push(chat_response.message);
             } else {
                 log::error!("Chat request failed. Received status: {}", resp.status());
@@ -221,7 +223,7 @@ async fn chat(prompt: String) {
         }
     }
 
-    log::info!("Current chat state: {:?}", current_chat);
+    log::debug!("Current chat state: {:?}", current_chat);
 
     log::info!("writing chat state to base.json");
 
