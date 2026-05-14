@@ -1,4 +1,8 @@
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, 
+    Serialize
+};
+use std::fmt;
 
 
 
@@ -63,11 +67,32 @@ pub struct Chat {
     pub stream: bool,
 }
 
+impl fmt::Display for Chat {
+
+    fn fmt(&self, f :&mut fmt::Formatter) -> fmt::Result {
+
+        write!(f, "Model: : {}\n", self.model)?;
+        
+        self.messages
+            .iter()
+            .for_each(|message| {
+                let _ = write!(f, "-------------------------------\n");
+                let _ = write!(f, "{}\n", message.content);
+                let _ = write!(f, "-------------------------------\n");
+            }
+        );
+
+        write!(f, "Tools: {:?}\n", self.tools)?;
+        write!(f, "Stream: {:?}\n", self.stream)?;
+        write!(f, "think: {:?}\n", self.think)
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Message {
     pub role: String,
     pub content: String,
-    pub thinking: Option<bool>,
+    pub thinking: Option<String>,
     pub images: Option<Vec<String>>,
     pub tool_calls: Option<Vec<Tool>>,
 
@@ -75,7 +100,14 @@ pub struct Message {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Tool {
-    pub name: String 
+    pub name: Function 
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Function {
+    pub name: String,
+    pub description: String,
+    pub arguments: String
 }
 
 #[derive(Serialize, Deserialize, Debug)]

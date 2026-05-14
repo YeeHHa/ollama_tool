@@ -17,7 +17,13 @@ mod data_structs;
 
 fn ollama_url() -> String {
 
-    "http://localhost:11434".to_string()
+    match env::var("OLLAMA_HOST") {
+        Ok(host) => format!("http://{}:11434", host),
+        Err(e) => {
+            log::debug!("OLLAMA_HOST environment variable not set, using localhost");
+            "http://localhost:11434".to_string()
+        }
+    }
 }
 
 fn help_message() {
@@ -213,6 +219,13 @@ async fn chat(prompt: String) {
                 };
                 log::debug!("Chat response received: {:?}", chat_response.message);
                 log::info!("{}", chat_response.message.content);
+
+                match &chat_response.message.thinking {
+                    Some(t) => log::debug!("thinking: {}",t),
+                    None => log::debug!("no thinking")
+                };
+
+                log::debug!("done = {}", chat_response.done);
                 current_chat.messages.push(chat_response.message);
             } else {
                 log::error!("Chat request failed. Received status: {}", resp.status());
@@ -223,7 +236,7 @@ async fn chat(prompt: String) {
         }
     }
 
-    log::debug!("Current chat state: {:?}", current_chat);
+    log::debug!("Current chat state: {}", current_chat);
 
     log::info!("writing chat state to base.json");
 
@@ -239,4 +252,13 @@ async fn chat(prompt: String) {
             log::error!("Failed to create base.json: {}", e);
         }
     }
+}
+
+
+async fn get_urls(search: &str) -> Vec<String> {
+
+
+    let endpoint = "www.api.duckduckgo.com/?q=Search&format=json&pretty=1";
+
+    vec![String::new()]
 }
