@@ -1,9 +1,14 @@
 use log;
 use env_logger::{self, Env};
+use tokio::io::AsyncWriteExt;
 use std::{env, io::Write};
 use tokio;
+use tokio::fs::{
+    File,
+    write,
+    read
+};
 use reqwest;
-use std::fs::File;
 use crate::data_structs::{
     Model, 
     Models,
@@ -169,11 +174,14 @@ async fn list_available_models() {
     }    
 }
 
+async fn new_chat(chat_name: String) {
+
+}
 async fn chat(prompt: String) {
 
     let endpoint = format!("{}/api/chat", ollama_url());
     
-    let current_chat_file = match File::open("base.json"){
+    let current_chat_file = match File::open("base.json").await{
         Ok(file) => file,
         Err(e) => {
             log::error!("Failed to open base.json: {}", e);
@@ -181,7 +189,21 @@ async fn chat(prompt: String) {
         }
     };
 
-    let mut current_chat: Chat = match serde_json::from_reader(current_chat_file){
+    let chat_string = match read("base.json").await {
+        Ok(file_name_bypes) => match String::from_utf8(file_name_bypes){
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("could not convert file from bytes to string");
+                return
+            }
+        },
+        Err(e) => {
+            log::error!("could not read chat file");
+            return
+        }
+    };
+
+    let mut current_chat: Chat = match serde_json::from_str(&chat_string){ 
         Ok(chat) => chat,
         Err(e) => {
             log::error!("Failed to parse base.json: {}", e);
@@ -240,18 +262,21 @@ async fn chat(prompt: String) {
 
     log::info!("writing chat state to base.json");
 
-    match File::create("base.json") {
-        Ok(mut file) => {
-            if let Err(e) = serde_json::to_writer_pretty(&mut file, &current_chat) {
-                log::error!("Failed to write chat state to base.json: {}", e);
-            } else {
-                log::info!("Chat state successfully written to base.json");
-            }
-        },
+    let formatted_Json:String = match serde_json::to_string_pretty(&current_chat){
+        Ok(value) => value,
         Err(e) => {
-            log::error!("Failed to create base.json: {}", e);
+            log::error!("unable to format json data");
+            return
         }
-    }
+    };
+
+    match write("base.json", &formatted_Json).await {
+        Ok(_v) => log::info!("saved file to base.json"),
+        Err(e)=> {
+            log::error!("could not save current chat to file! {}", e );
+            return
+        }
+    };
 }
 
 
