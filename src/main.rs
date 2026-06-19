@@ -1,12 +1,15 @@
 use log;
-use env_logger::{self, Env};
+use fern;
+use humantime::format_rfc3339_seconds;
+use std::time::SystemTime;
 use tokio::io::AsyncWriteExt;
 use std::{env, io::Write};
 use tokio;
 use tokio::fs::{
     File,
     write,
-    read
+    read,
+    rename
 };
 use reqwest;
 use crate::data_structs::{
@@ -20,11 +23,11 @@ use crate::data_structs::{
 mod data_structs;
 
 
-fn ollama_url() -> String {
+async fn ollama_url() -> String {
 
     match env::var("OLLAMA_HOST") {
         Ok(host) => format!("http://{}:11434", host),
-        Err(e) => {
+        Err(_) => {
             log::debug!("OLLAMA_HOST environment variable not set, using localhost");
             "http://localhost:11434".to_string()
         }
@@ -37,17 +40,82 @@ fn help_message() {
     log::info!("  -r                 : List running models");
     log::info!("  -l                 : List available models");
     log::info!("  -c <prompt>        : Chat with a model using the provided prompt");
+    log::info!("  -f                 : direct output to a log file");
+    log::info!("  -m                 : start mpc servers");
+
+    log::info!("ENVIRONMENT VARIABLES");
+    log::info!("OLLAMA_HOST     => ollama server ip address : default = localhost");
+    log::info!("LOG_FILE_NAME   => name of file to write logs to : default = ./llama_tool.log");
+    log::info!("RUST_LOG        => log level value : default = info");
 }
 
 #[tokio::main]
 async fn main() {
-    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init(); 
-    
-    log::info!("Ollama tool started.");
+     
 
-    let args: Vec<String> = env::args().collect();
+    let mut args: Vec<String> = env::args().collect();
+
+    let log_file_name:String = match env::var("LOG_FILE_NAME"){
+        Ok(f) => f,
+        Err(_) => String::from("llama_tool.log")
+    };
+
+    let mut log_to_file: bool = false;
+    if let Some(arg_pos) = args.iter().position(|x| *x == "-f"){
+        args.remove(arg_pos);
+        log_to_file = true;
+    }
+
+    let log_level:log::LevelFilter = match env::var("RUST_LOG") {
+        Ok(l) => {
+            match l.as_str() {
+                "trace" => log::LevelFilter::Trace,
+                "debug" => log::LevelFilter::Debug,
+                "info"  => log::LevelFilter::Info,
+                "warn"  => log::LevelFilter::Warn,
+                "error" => log::LevelFilter::Error,
+                "off"   => log::LevelFilter::Off,
+                _       => log::LevelFilter::Info
+            }
+        },
+        Err(_) => log::LevelFilter::Info 
+    };
+
+    let mut dispatch = fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{} {} {}] {}",
+                format_rfc3339_seconds(SystemTime::now()),
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
+        .level(log_level);
+
+    if log_to_file {
+        dispatch = dispatch.chain(
+            match fern::log_file(log_file_name.as_str()){
+                Ok(f) => f,
+                Err(e) => {
+                    eprint!("Failed to open/create log file {}\nErr: {}", log_file_name, e);
+                    return
+                }
+            }
+        );
+    }else {
+        dispatch = dispatch.chain(std::io::stdout());
+    }
+
+    match dispatch.apply() {
+        Ok(d) => log::info!("logging initiated"),
+        Err(e) => {
+            eprint!("could not init logging\nErr: {}", e)
+        }
+    }; 
     log::debug!("Command-line arguments: {:?}", args);
 
+    log::info!("llama tool started.");
     match args.len() {
         1 => check_ollama_status().await,
         2 => {
@@ -60,6 +128,7 @@ async fn main() {
                     log::warn!("No prompt provided for chat. Exiting.");
                     help_message();
                 },
+                "-m" => log::info!("starting mcp server"),
                 _ => log::warn!("Unknown flag provided: {}. Exiting.", flag)
             }
         },
@@ -68,6 +137,7 @@ async fn main() {
             let prompt = &args[2];
             match flag.as_str() {
                 "-c" => chat(prompt.to_string()).await,
+                "-s" => save_chat(prompt).await,
                 _ => {
                     log::warn!("Unknown flag provided: {}. Exiting.", flag);
                     help_message();
@@ -86,7 +156,7 @@ async fn main() {
 
 async fn check_ollama_status() {
 
-    let url = ollama_url();
+    let url = ollama_url().await;
 
     let response = reqwest::get(&url).await;
 
@@ -114,7 +184,7 @@ async fn check_ollama_status() {
 }
 
 async fn get_running_models() {
-    let url = format!("{}/models/running", ollama_url());
+    let url = format!("{}/models/running", ollama_url().await);
 
     let response = reqwest::get(&url).await;
 
@@ -140,7 +210,7 @@ async fn get_running_models() {
 }
 
 async fn list_available_models() {
-    let url: String = format!("{}/api/tags", ollama_url());
+    let url: String = format!("{}/api/tags", ollama_url().await);
 
     let response:Result<reqwest::Response, reqwest::Error> = reqwest::get(&url).await;
 
@@ -174,12 +244,49 @@ async fn list_available_models() {
     }    
 }
 
-async fn new_chat(chat_name: String) {
+async fn save_chat(chat_name: &String) {
+    /*
+    find current chat
+    save it to new chat 
+    create new chat file*/
+    match rename("base.json", chat_name).await {
+        Ok(v) => log::info!("successfully renamed base.json to {}", chat_name),
+        Err(e) => {
+            log::error!("could not rename base.json\n{e}");
+            return
+        }
+    };
 
+    let starting_message:Message = Message {
+        role: String::from("system"),
+        content: String::from("you are a very helpful assistant."),
+        thinking: None,
+        images: None,
+        tool_calls: None
+    };
+
+    let new_chat: Chat = Chat {
+        model: String::from("qwen3.6:35b"),
+        messages: vec![starting_message],
+        tools: None,
+        think: None,
+        stream: false
+    };
+
+    match  serde_json::to_string_pretty(&new_chat) {
+        Ok(formatted_json) => {
+            log::info!("converted new chat to string");
+            match write("base.json", &formatted_json).await {
+                Ok(_) => log::info!("saved file to base.json"),
+                Err(e) => log::error!("could not write new base.json file\n{}", e)
+            };
+        },
+        Err(e) => log::error!("could not convert chat struct to string {}", e)
+    };
 }
 async fn chat(prompt: String) {
 
-    let endpoint = format!("{}/api/chat", ollama_url());
+    let endpoint = format!("{}/api/chat", ollama_url().await);
     
     let current_chat_file = match File::open("base.json").await{
         Ok(file) => file,
@@ -262,7 +369,7 @@ async fn chat(prompt: String) {
 
     log::info!("writing chat state to base.json");
 
-    let formatted_Json:String = match serde_json::to_string_pretty(&current_chat){
+    let formatted_json:String = match serde_json::to_string_pretty(&current_chat){
         Ok(value) => value,
         Err(e) => {
             log::error!("unable to format json data");
@@ -270,7 +377,7 @@ async fn chat(prompt: String) {
         }
     };
 
-    match write("base.json", &formatted_Json).await {
+    match write("base.json", &formatted_json).await {
         Ok(_v) => log::info!("saved file to base.json"),
         Err(e)=> {
             log::error!("could not save current chat to file! {}", e );
