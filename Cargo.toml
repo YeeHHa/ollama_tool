@@ -4,11 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+axum = { version = "0.8.9", features = ["macros"] }
 env_logger = "0.11.8"
 fern = "0.7.1"
 humantime = "2.3.0"
 log = "0.4.29"
 reqwest = { version = "0.13.1", features = ["json"] }
+rmcp = { version = "1.7.0", features = ["transport-streamable-http-server"] }
+schemars = "1.2.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tokio = { version = "1.49.0", features = ["full"] }
+tokio-util = "0.7.18"

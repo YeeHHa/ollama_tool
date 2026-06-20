@@ -2,8 +2,7 @@ use log;
 use fern;
 use humantime::format_rfc3339_seconds;
 use std::time::SystemTime;
-use tokio::io::AsyncWriteExt;
-use std::{env, io::Write};
+use std::env;
 use tokio;
 use tokio::fs::{
     File,
@@ -12,16 +11,22 @@ use tokio::fs::{
     rename
 };
 use reqwest;
-use crate::data_structs::{
-    Model, 
+use rmcp::transport::streamable_http_server:: {
+    StreamableHttpServerConfig,
+    StreamableHttpService,
+    session::local::LocalSessionManager
+};
+
+mod data_structs;
+use data_structs::{
     Models,
     Chat,
     ChatResponse,
     Message
 };
 
-mod data_structs;
-
+mod take_note_mcp;
+use take_note_mcp::NoteTaker;
 
 async fn ollama_url() -> String {
 
@@ -128,7 +133,7 @@ async fn main() {
                     log::warn!("No prompt provided for chat. Exiting.");
                     help_message();
                 },
-                "-m" => log::info!("starting mcp server"),
+                "-m" => start_mcp_server().await,
                 _ => log::warn!("Unknown flag provided: {}. Exiting.", flag)
             }
         },
@@ -387,10 +392,38 @@ async fn chat(prompt: String) {
 }
 
 
-async fn get_urls(search: &str) -> Vec<String> {
+async fn start_mcp_server() {
+
+    let MCP_SERVER: &str = "0.0.0.0:4000";
 
 
-    let endpoint = "www.api.duckduckgo.com/?q=Search&format=json&pretty=1";
+    log::info!("starting mcp server on {}", MCP_SERVER);
 
-    vec![String::new()]
+    let ct = tokio_util::sync::CancellationToken::new();
+
+    let service = StreamableHttpService::new(
+        || Ok(NoteTaker::new()),
+        LocalSessionManager::default().into(),
+        StreamableHttpServerConfig::default().with_cancellation_token(ct.child_token())
+    );
+
+    let router = axum::Router::new().nest_service("/mcp", service);
+    let tcp_listener = match tokio::net::TcpListener::bind(MCP_SERVER).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            log::error!("could not start mcp server\n{}", e);
+            return
+        }
+    };
+
+    let _ = axum::serve(tcp_listener, router)
+                .with_graceful_shutdown(async move {
+                    match tokio::signal::ctrl_c().await {
+                        Ok(_) => log::info!("stopping server"),
+                        Err(e)  => log::error!("could not await for shutdown\n{}", e)
+                    };
+
+                    ct.cancel();
+                }).await;    
+    
 }
