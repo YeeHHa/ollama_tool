@@ -7,7 +7,10 @@ use rmcp::{
     handler::server::{
         router::tool::ToolRouter,
         wrapper::Parameters
-    }, model::*, service::RequestContext, task_handler, task_manager::{
+    }, model::*, 
+    service::RequestContext, 
+    task_handler, 
+    task_manager::{
         OperationProcessor,
         OperationResultTransport
     }, tool, tool_handler, tool_router
@@ -140,7 +143,7 @@ impl ServerHandler for NoteTaker {
                 .build()
         )
         .with_server_info(Implementation::from_build_env())
-        .with_protocol_version(ProtocolVersion::V_2024_11_05)
+        .with_protocol_version(ProtocolVersion::V_2025_11_25)
         .with_instructions("This server provides note taking tools. Tools: take_note.".to_string())
     }
 
