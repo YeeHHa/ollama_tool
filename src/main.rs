@@ -52,6 +52,9 @@ fn help_message() {
     log::info!("OLLAMA_HOST     => ollama server ip address : default = localhost");
     log::info!("LOG_FILE_NAME   => name of file to write logs to : default = ./llama_tool.log");
     log::info!("RUST_LOG        => log level value : default = info");
+    log::info!("MCP_SERVER      => ip:port to bind mcp server to : default = 127.0.0.1:4000");
+    log::info!("MCP_HOST        => allowlist hosts for inbound Host validation : default = 'localhost,127.0.0.1'");
+    log::info!("MCP_ORIGIN     => allowlist for Origin validation : default = None");
 }
 
 #[tokio::main]
@@ -113,7 +116,7 @@ async fn main() {
     }
 
     match dispatch.apply() {
-        Ok(d) => log::info!("logging initiated"),
+        Ok(_) => log::info!("logging initiated"),
         Err(e) => {
             eprint!("could not init logging\nErr: {}", e)
         }
@@ -394,21 +397,52 @@ async fn chat(prompt: String) {
 
 async fn start_mcp_server() {
 
-    let MCP_SERVER: &str = "0.0.0.0:4000";
+    let mut mcp_server: String = String::from("127.0.0.1:4000");
+    let mut mcp_host:   String = String::from("127.0.0.1");
+    let mut mcp_origin: String = String::new();
 
+    for (key, value) in env::vars() {
+        match key.as_str() {
+            "MCP_SERVER"    => mcp_server   = value,
+            "MCP_HOST"      => mcp_host     = value,
+            "MCP_ORIGIN"    => mcp_origin   = value,
+            _               => continue 
+        }
+    }
 
-    log::info!("starting mcp server on {}", MCP_SERVER);
+    let mut server_config:StreamableHttpServerConfig = StreamableHttpServerConfig::default();
+
+    
+    if mcp_host.as_str() != "127.0.0.1" {
+        server_config = server_config.with_allowed_hosts(
+            mcp_host.split(',')
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>()
+        );
+    }
+
+    if !mcp_origin.is_empty() {
+        server_config = server_config.with_allowed_origins(
+            mcp_origin.split(',')
+            .map( |x| x.to_string())
+            .collect::<Vec<String>>()
+        );
+    }
+
+    log::debug!("StreamableHttpServerConfig values --->\n{:#?}\n", server_config);
+
+    log::info!("starting mcp server on {}", mcp_server);
 
     let ct = tokio_util::sync::CancellationToken::new();
 
     let service = StreamableHttpService::new(
         || Ok(NoteTaker::new()),
         LocalSessionManager::default().into(),
-        StreamableHttpServerConfig::default().with_cancellation_token(ct.child_token())
+        server_config.with_cancellation_token(ct.child_token())
     );
 
     let router = axum::Router::new().nest_service("/mcp", service);
-    let tcp_listener = match tokio::net::TcpListener::bind(MCP_SERVER).await {
+    let tcp_listener = match tokio::net::TcpListener::bind(mcp_server).await {
         Ok(listener) => listener,
         Err(e) => {
             log::error!("could not start mcp server\n{}", e);

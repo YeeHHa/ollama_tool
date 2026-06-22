@@ -3,20 +3,14 @@ use std::{
     sync::Arc
 };
 use rmcp::{
-    ErrorData as McpError,
-    ServerHandler, 
+    ErrorData as McpError, RoleServer, ServerHandler, 
     handler::server::{
         router::tool::ToolRouter,
         wrapper::Parameters
-    }, model::*, 
-    task_handler, 
-    task_manager::{
+    }, model::*, service::RequestContext, task_handler, task_manager::{
         OperationProcessor,
         OperationResultTransport
-    }, 
-    tool, 
-    tool_handler, 
-    tool_router
+    }, tool, tool_handler, tool_router
 };
 
 use tokio::sync::Mutex;
@@ -113,9 +107,9 @@ impl NoteTaker {
         log::info!("wrote message to notebook writing contents to qwen-notebook.txt");
 
         match write("qwens-notebook.txt", current_notes.as_bytes()).await {
-            Ok(r) => log::info!("saved contents of current notes to qwen-notebook.txt"),
+            Ok(_) => log::info!("saved contents of current notes to qwen-notebook.txt"),
             Err(e) => {
-                log::error!("could not save contents of current notes to file");
+                log::error!("could not save contents of current notes to file\n{}", e);
                 return Err(McpError::internal_error("could note save file", None)) 
             }
         };
@@ -134,6 +128,34 @@ impl NoteTaker {
 
 }
 
+#[tool_handler(meta = Meta(rmcp::object!({"tool_meta_key": "tool_meta_value"})))]
+#[task_handler]
 impl ServerHandler for NoteTaker {
-    
+
+
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .build()
+        )
+        .with_server_info(Implementation::from_build_env())
+        .with_protocol_version(ProtocolVersion::V_2024_11_05)
+        .with_instructions("This server provides note taking tools. Tools: take_note.".to_string())
+    }
+
+    async fn initialize(
+        &self,
+        _request: InitializeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, McpError> {
+        if let Some(http_request_part) = context.extensions.get::<axum::http::request::Parts>() {
+            let initialize_header = &http_request_part.headers;
+            let initialize_uri = &http_request_part.uri;
+            log::info!("Initalized request!");
+            log::debug!("Request headers -> {:?}\nRequest uri -> {:?}", initialize_header, initialize_uri);
+        }
+
+        Ok(self.get_info())
+    }
 }
