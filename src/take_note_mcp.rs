@@ -128,6 +128,27 @@ impl NoteTaker {
             )
         )
     }
+    
+    fn _create_resource_text(&self, uri: &str, name: &str) -> Resource {
+        RawResource::new(uri, name.to_string()).no_annotation()
+    }
+
+    /// Returns the `Mcp-Session-Id` of the current session (streamable HTTP only).
+    #[tool(description = "Get the session ID for this connection")]
+    fn get_session_id(&self, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, McpError> {
+        let session_id = ctx
+            .extensions
+            .get::<axum::http::request::Parts>()
+            .and_then(|parts| parts.headers.get("mcp-session-id"))
+            .map(|v| v.to_str().unwrap_or("(non-ascii)").to_owned());
+
+        match session_id {
+            Some(id) => Ok(CallToolResult::success(vec![Content::text(id)])),
+            None => Ok(CallToolResult::success(vec![Content::text(
+                "no session (not running over streamable HTTP?)",
+            )])),
+        }
+    }
 
 }
 
@@ -137,16 +158,31 @@ impl ServerHandler for NoteTaker {
 
 
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+        let info = ServerInfo::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .build()
         )
         .with_server_info(Implementation::from_build_env())
         .with_protocol_version(ProtocolVersion::V_2025_11_25)
-        .with_instructions("This server provides note taking tools. Tools: take_note.".to_string())
-    }
+        .with_instructions("This server provides note taking tools. Tools: take_note.".to_string());
 
+        log::debug!("server info ->\n{:?}", info);
+
+        info
+    }
+    
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, McpError> {
+        Ok(ListResourceTemplatesResult {
+            next_cursor: None,
+            resource_templates: Vec::new(),
+            meta: None,
+        })
+    }
     async fn initialize(
         &self,
         _request: InitializeRequestParams,
