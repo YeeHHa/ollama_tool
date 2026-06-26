@@ -23,12 +23,12 @@ use tokio::fs::{
     try_exists
 };
 
-struct ToolOperationResult {
+struct ToolCallOperationResult {
     id: String,
     result: Result<CallToolResult, McpError>
 }
 
-impl OperationResultTransport for ToolOperationResult {
+impl OperationResultTransport for ToolCallOperationResult {
     
     fn operation_id(&self) -> &String {
         &self.id
@@ -177,6 +177,7 @@ impl ServerHandler for NoteTaker {
         _request: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, McpError> {
+        log::debug!("list resource template ->\n{:#?}", _request);
         Ok(ListResourceTemplatesResult {
             next_cursor: None,
             resource_templates: Vec::new(),
