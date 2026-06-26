@@ -28,6 +28,7 @@ use data_structs::{
 mod take_note_mcp;
 use take_note_mcp::NoteTaker;
 
+
 async fn ollama_url() -> String {
 
     match env::var("OLLAMA_HOST") {
