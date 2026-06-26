@@ -28,6 +28,10 @@ use data_structs::{
 mod take_note_mcp;
 use take_note_mcp::NoteTaker;
 
+mod web_search_mcp;
+use web_search_mcp::WebSearch;
+
+mod searxng_data;
 async fn ollama_url() -> String {
 
     match env::var("OLLAMA_HOST") {
@@ -429,6 +433,8 @@ async fn start_mcp_server() {
         );
     }
 
+    let server_config_web_search = server_config.clone();
+
     log::debug!("StreamableHttpServerConfig values --->\n{:#?}\n", server_config);
 
     log::info!("starting mcp server on {}", mcp_server);
@@ -441,7 +447,16 @@ async fn start_mcp_server() {
         server_config.with_cancellation_token(ct.child_token())
     );
 
-    let router = axum::Router::new().nest_service("/mcp", service);
+    let service_web_search = StreamableHttpService::new(
+        || Ok(WebSearch::new()),
+        LocalSessionManager::default().into(),
+        server_config_web_search.with_cancellation_token(ct.child_token())
+    );
+
+    let router = axum::Router::new()
+        .nest_service("/mcp", service)
+        .nest_service("/mcp/web-search", service_web_search);
+
     let tcp_listener = match tokio::net::TcpListener::bind(mcp_server).await {
         Ok(listener) => listener,
         Err(e) => {

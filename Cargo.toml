@@ -9,7 +9,7 @@ env_logger = "0.11.8"
 fern = "0.7.1"
 humantime = "2.3.0"
 log = "0.4.29"
-reqwest = { version = "0.13.1", features = ["json"] }
+reqwest = { version = "0.13.1", features = ["json", "query"] }
 rmcp = { version = "1.7.0", features = ["transport-streamable-http-server"] }
 schemars = "1.2.1"
 serde = { version = "1.0.228", features = ["derive"] }
