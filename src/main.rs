@@ -454,7 +454,7 @@ async fn start_mcp_server() {
     );
 
     let router = axum::Router::new()
-        .nest_service("/mcp", service)
+        .nest_service("/mcp/note-taker", service)
         .nest_service("/mcp/web-search", service_web_search);
 
     let tcp_listener = match tokio::net::TcpListener::bind(mcp_server).await {
