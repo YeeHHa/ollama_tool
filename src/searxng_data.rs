@@ -9,7 +9,6 @@ use std::collections::HashMap;
 pub struct SearxngParams {
     pub q: String,
     pub format: String,
-    pub image_proxy: bool,
 
 }
 
@@ -18,7 +17,6 @@ impl SearxngParams {
         SearxngParams { 
             q: query.to_string(),
             format: "json".to_string(), 
-            image_proxy: true 
         }
     }
 }
