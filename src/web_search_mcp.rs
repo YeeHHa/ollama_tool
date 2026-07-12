@@ -3,6 +3,8 @@ use std::{
     sync::Arc,
     collections::HashMap
 };
+use axum::http::response;
+use uuid::Uuid;
 use rmcp::{
     ErrorData as McpError,
     RoleServer, 
@@ -74,12 +76,19 @@ pub struct WebSearchQuery {
     query: String
 }
 
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+pub struct FetchUrl {
+    session_uuid: String,
+    id: u32
+}
+
 #[derive(Clone)]
 pub struct WebSearch {
     tool_router: ToolRouter<WebSearch>,
     processor: Arc<Mutex<OperationProcessor>>,
-    search_results: Arc<Mutex<HashMap<String,Vec<SearchResult>>>>
+    search_results: Arc<Mutex<HashMap<Uuid,Vec<SearchResult>>>>
 }
+
 
 
 #[tool_router]
@@ -97,8 +106,7 @@ impl WebSearch  {
     #[tool(description = "Get a json response from a web search engine query")]
     async fn web_search(
         &self,
-        Parameters(WebSearchQuery { query }): Parameters<WebSearchQuery>,
-        ctx: RequestContext<RoleServer>
+        Parameters(WebSearchQuery { query }): Parameters<WebSearchQuery>
     ) -> Result<CallToolResult, McpError> {
 
         log::info!("got the following search query\n{:#?}" ,query);
@@ -170,21 +178,15 @@ impl WebSearch  {
             .collect();
         log::debug!("SearchResult created. adding to app state");
 
-        if let Some(session_id) = self.get_session_id(&ctx) {
-            log::debug!("adding SearchResult for session {}",session_id);
+
+        let session_uuid: Uuid = Uuid::new_v4();
+        log::debug!("adding SearchResult for session {}",session_uuid);
+        {
             let mut state = self.search_results.lock().await;
-            state.insert(session_id, search_results.clone()); 
+            let _ = state.insert(session_uuid, search_results.clone()); 
             log::info!("session SearchResult saved");
             log::debug!("current state\n\n{:#?}\n\n", state);
-        }else{
-
-            log::error!("could not save search results for qury {}",query);
-
-            return Err(
-                McpError::internal_error("Could not complete web_search", None)
-            )
         }
-
         let response = match Content::json(search_results) {
             Ok(json) => json,
             Err(e) => {
@@ -201,6 +203,9 @@ impl WebSearch  {
                     response,
                     Content::text(
                         "success!".to_string()
+                    ),
+                    Content::text(
+                        format!("session_uuid: {}",session_uuid)
                     )
                 ]
             )
@@ -208,14 +213,111 @@ impl WebSearch  {
         
     }
 
-    fn get_session_id(&self, ctx: &RequestContext<RoleServer>) -> Option<String> {
-        ctx
-            .extensions
-            .get::<axum::http::request::Parts>()
-            .and_then(|parts| parts.headers.get("mcp-session-id"))
-            .map(|v| v.to_str().unwrap_or("(non-ascii)").to_owned())
-    }
+    #[tool(description = "fetch the contents of a url. requires the session_uuid and id from a pervious web_search tool call")]
+    async fn fetch_url(
+        &self,
+        Parameters(FetchUrl { session_uuid, id }): Parameters<FetchUrl>
+    ) -> Result<CallToolResult, McpError> {
+        log::info!("starting fetch_url tool call");
 
+        let session_uuid = match Uuid::parse_str(session_uuid.as_str()) {
+            Ok(u) => u,
+            Err(e) => {
+                log::error!("could not parse uuid from session_uuid: {}\n{}", session_uuid, e);
+                return Err(
+                    McpError::invalid_request("valid session_uuid is required", None)
+                )
+            }
+        };
+        log::debug!("session_uuid: {}\tid: {}\n", session_uuid, id);
+
+        log::debug!("checking app state for session_uuid {}", session_uuid);
+        let mut state  = self.search_results.lock().await;
+        if let Some(session_results) = state.get(&session_uuid){
+
+            let target = match session_results
+                .iter()
+                .find(|x| x.id == id){
+                    Some(result) => result,
+                    None => {
+                        log::info!("no search result found for id: {} in session_uuid {}",id, session_uuid);
+                        return Ok(
+                            CallToolResult::success(
+                                vec![
+                                    Content::text(
+                                        format!("no search result found for id:{} in session_uuid: {}", id, session_uuid)
+                                    )
+                                ]
+                            )
+                        )
+                    }
+                };
+
+            log::info!("found search result for id: {} in session_uuid: {}", id, session_uuid);
+            log::debug!("search result struct\n{:#?}", target);
+            log::info!("attempting to fetch content from url: {}", target.url);
+            
+            let url = match reqwest::Url::parse(&target.url) {
+                Ok(u) => u,
+                Err(e) => {
+                    log::error!("Could not parse url from search result:{:#?}\n{}",target, e);
+                    return Err(
+                        McpError::internal_error("unable to parse url", None)
+                    )
+                }
+            };
+
+            let content: String = match reqwest::Client::new()
+                .get(url)
+                .send()
+                .await {
+                    Ok(response) => {
+                        log::debug!("response struct {:#?}", response);
+                        if let Some(content_length) = response.content_length(){
+                            log::info!("response Content-length: {}", content_length);
+                        }
+                        if response.status().is_success() {
+                            match response.text().await {
+                                Ok(text) => text,
+                                Err(e) => {
+                                    log::error!("could not parse response text for url: {}\n{}", target.url,e);
+                                    return Err(
+                                        McpError::internal_error(format!("could not fetch content of url: {}",target.url), None)
+                                    )
+                                }
+                            }
+                        }
+                        else {
+                            return Err(
+                                McpError::invalid_request(format!("fetching url content was unsuccessful. status_code: {}", response.status()), None)
+                            )
+                        }
+                    },
+                    Err(e) => {
+                        log::error!("could not get response from url {}\n{}",target.url, e);
+                        return Err(
+                            McpError::internal_error(format!("could not fetch content of url: {}",target.url), None)
+                        )
+                    }
+                };
+                
+                Ok(
+                    CallToolResult::success(
+                        vec![
+                            Content::text(
+                                format!("fetching of content from url: {} was successful", target.url)
+                            ),
+                            Content::text(content)
+                        ]
+                    )
+                )
+        }else{
+            log::info!("no session_uuid was found in app state for {}", session_uuid);
+            return Err(
+                McpError::invalid_request("session_uuid not found in app state. cannot fetch url", None)
+            )
+        }
+    }
 }
 
 #[tool_handler(meta = Meta(rmcp::object!({"tool_meta_key": "tool_meta_value"})))]
@@ -231,7 +333,22 @@ impl ServerHandler for WebSearch {
         )
         .with_server_info(Implementation::from_build_env())
         .with_protocol_version(ProtocolVersion::V_2025_11_25)
-        .with_instructions("This server provides web search functions. Tools: web_search.".to_string());
+        .with_instructions(
+            "This server provides web search functions. Tools: web_search fetch_url. 
+            
+            tool web_search may be used by independently.
+
+            tool fetch_url requires a session_uuid and id that can be parsed from the output of a call to tool web_search.
+
+            fetch_url steps:
+                step 1: call tool web_search providing a web search query.
+
+                step 2: parse web_search tool call result for 'session_uuid' value.
+
+                step 3: select 'id' of url you want to fetch the contents of. 
+
+                step 4: perform fetch_url tool call providing the session_uuid and id obtained in steps 2 and 3. 
+            ".to_string());
 
         log::debug!("server info ->\n{:?}", info);
 
