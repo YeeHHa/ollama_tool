@@ -4,19 +4,23 @@ use std::{
     collections::HashMap
 };
 use rmcp::{
-    ErrorData as McpError
-    , RoleServer
-    , ServerHandler, 
+    ErrorData as McpError,
+    RoleServer, 
+    ServerHandler, 
     handler::server::{
         router::tool::ToolRouter,
         wrapper::Parameters
-    }, model::*, 
+    }, 
+    model::*, 
     service::RequestContext, 
     task_handler, 
     task_manager::{
         OperationProcessor,
         OperationResultTransport
-    }, tool, tool_handler, tool_router
+    }, 
+    tool, 
+    tool_handler, 
+    tool_router
 };
 use schemars::JsonSchema;
 use serde::{
@@ -101,6 +105,7 @@ impl WebSearch  {
 
         log::debug!("creating new searxng paramers");
         let params = SearxngParams::new(&query);
+        log::debug!("params for query <{}>\n{:?}", query, params);
 
         let web_search_endpoint = match std::env::var("SEARXNG_URL") {
             Ok(endpoint) => {
