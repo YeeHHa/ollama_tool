@@ -1,7 +1,5 @@
 use std::{
-    any::Any,
-    sync::Arc,
-    collections::HashMap
+    any::Any, collections::HashMap, env, sync::Arc
 };
 use axum::http::response;
 use uuid::Uuid;
@@ -36,10 +34,8 @@ use tokio::fs::{
     try_exists
 };
 use reqwest::{
-    Client,
-    header::{
-        ACCEPT,
-    }
+    Client, 
+    header
 };
 
 use super::searxng_data::{
@@ -71,6 +67,7 @@ struct SearchResult{
     url: String,
 }
 
+
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 pub struct WebSearchQuery {
     query: String
@@ -86,7 +83,8 @@ pub struct FetchUrl {
 pub struct WebSearch {
     tool_router: ToolRouter<WebSearch>,
     processor: Arc<Mutex<OperationProcessor>>,
-    search_results: Arc<Mutex<HashMap<Uuid,Vec<SearchResult>>>>
+    search_results: Arc<Mutex<HashMap<Uuid,Vec<SearchResult>>>>,
+    r_client: reqwest::Client
 }
 
 
@@ -95,10 +93,47 @@ pub struct WebSearch {
 impl WebSearch  {
     
     pub fn new() -> WebSearch {
+
+        let mut default_headers = header::HeaderMap::new();
+
+        default_headers.insert(
+            header::ACCEPT, 
+            header::HeaderValue::from_static("application/json, text/html")
+        );
+        let user_agent: String = match env::var("CUSTOM_USER_AGENT") {
+            Ok(ua) => ua,
+            Err(e) => {
+                log::error!("{}",e);
+                log::warn!("CUSTOM_USER_AGENT env var not found. defaulting to cargo env values");
+                concat!(
+                    env!("CARGO_PKG_NAME"),
+                    "/",
+                    env!("CARGO_PKG_VERSION"),
+                    " ",
+                    "(",
+                    env!("CARGO_PKG_REPOSITORY"),
+                    ")"
+                ).into()
+            }
+        };
+
+
+        let client = match reqwest::ClientBuilder::new()
+            .user_agent(user_agent)
+            .build() 
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    log::error!("could not build reqwest client for websearch mcp server\n{}",e);
+                    panic!("unable to continue with out reqwest client");
+                }
+        };
+                
         Self {
             tool_router: Self::tool_router(),
             processor: Arc::new(Mutex::new(OperationProcessor::new())),
-            search_results: Arc::new(Mutex::new(HashMap::new()))
+            search_results: Arc::new(Mutex::new(HashMap::new())),
+            r_client: client 
         }
     }
 
@@ -118,7 +153,15 @@ impl WebSearch  {
         let web_search_endpoint = match std::env::var("SEARXNG_URL") {
             Ok(endpoint) => {
                 log::debug!("got searxng url from env var -> {}", endpoint);
-                endpoint
+                match reqwest::Url::parse(&endpoint) {
+                    Ok(url) => url,
+                    Err(e) => {
+                        log::error!("unable to parse searxng url from SEARXNG_URL {}\n{}",endpoint, e);
+                        return Err(
+                            McpError::internal_error("unable to connect to search  engine", None)
+                        )
+                    }
+                }
             },
             Err(e) => {
                 log::error!("SEARXNG_URL env var not set! cannot find searxng instance\n{}",e);
@@ -127,16 +170,34 @@ impl WebSearch  {
         };
 
         log::debug!("creating requests client");
-        let response = Client::new()
+        let searxng_response: SearxngResponse = match self.r_client 
             .get(web_search_endpoint)
             .query(&params)
-            .header(ACCEPT, "application/json")
             .send()
-            .await;
-
-        let searxng_response: SearxngResponse = match response {
+            .await {
             Ok(res) => {
-                if res.status().is_success() {
+                let sc: reqwest::StatusCode = res.status();
+                if sc.is_success() {
+
+                    if let Some(content_type) = res.headers().get(header::CONTENT_TYPE) {
+                        let ct = match content_type.to_str() {
+                            Ok(ct) => ct,
+                            Err(e) => {
+                                log::error!("could not parse content-type from searxng response\n{}", e);
+                                return Err(
+                                    McpError::internal_error("could not complete web_search request", None)
+                                )
+                            }
+                        };
+                        log::debug!("content type is {}" ,ct);
+                        match ct {
+                            "application/json" => {
+                                log::info!("got json");
+
+                            },
+                            _ => log::error!("searxng responed with invalid content-type header")
+                        };
+                    }
                     match res.json().await {
                         Ok(s_result) => s_result,
                         Err(e) => {
@@ -267,7 +328,7 @@ impl WebSearch  {
                 }
             };
 
-            let content: String = match reqwest::Client::new()
+            let content: String = match self.r_client 
                 .get(url)
                 .send()
                 .await {
