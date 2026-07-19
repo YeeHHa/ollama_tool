@@ -32,6 +32,8 @@ mod web_search_mcp;
 use web_search_mcp::WebSearch;
 
 mod searxng_data;
+
+mod errors_trait;
 async fn ollama_url() -> String {
 
     match env::var("OLLAMA_HOST") {

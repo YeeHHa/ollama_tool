@@ -38,6 +38,7 @@ use reqwest::{
     header
 };
 
+use super::errors_trait::LogError;
 use super::searxng_data::{
     SearxngParams,
     SearxngResponse
@@ -155,18 +156,26 @@ impl WebSearch  {
                 log::debug!("got searxng url from env var -> {}", endpoint);
                 match reqwest::Url::parse(&endpoint) {
                     Ok(url) => url,
-                    Err(e) => {
-                        log::error!("unable to parse searxng url from SEARXNG_URL {}\n{}",endpoint, e);
-                        return Err(
-                            McpError::internal_error("unable to connect to search  engine", None)
+                    Err(e) => return self.log_error(
+                        McpError::internal_error("unable to connect to search  engine", None), 
+                        Some(
+                            format!("unable to parse searxng url from SEARXNG_URL {}\n{}",
+                                endpoint, 
+                                e
+                            )
                         )
-                    }
+                    )
                 }
             },
-            Err(e) => {
-                log::error!("SEARXNG_URL env var not set! cannot find searxng instance\n{}",e);
-                return Err(McpError::internal_error("Could not complete web_search", None))
-            }
+            Err(e) => return self.log_error(
+                McpError::internal_error("Could not complete web_search", None),
+                Some(
+                    format!(
+                        "SEARXNG_URL env var not set! cannot find searxng instance\n{}",
+                        e
+                    )
+                )
+            )
         };
 
         log::debug!("creating requests client");
@@ -182,12 +191,16 @@ impl WebSearch  {
                     if let Some(content_type) = res.headers().get(header::CONTENT_TYPE) {
                         let ct = match content_type.to_str() {
                             Ok(ct) => ct,
-                            Err(e) => {
-                                log::error!("could not parse content-type from searxng response\n{}", e);
-                                return Err(
-                                    McpError::internal_error("could not complete web_search request", None)
+                            Err(e) => return self.log_error(
+                                McpError::internal_error("could not complete web_search request", None), 
+                                Some(
+                                    format!(
+                                        "could not parse content-type from searxng response\n{}", 
+                                        e
+                                    )
                                 )
-                            }
+                            )
+                            
                         };
                         log::debug!("content type is {}" ,ct);
                         match ct {
@@ -200,26 +213,33 @@ impl WebSearch  {
                     }
                     match res.json().await {
                         Ok(s_result) => s_result,
-                        Err(e) => {
-                            log::error!("could not parse SearxngResponse from reqwest\n{:?}",e);
-                            return Err(
-                                McpError::internal_error("could not complete web_search", None)
+                        Err(e) => return self.log_error(
+                            McpError::internal_error("could not complete web_search", None),
+                            Some(
+                                format!(
+                                    "could not parse SearxngResponse from reqwest\n{:?}"
+                                    ,e
+                                )
                             )
-                        }
+                        ) 
                     }
                 }else {
-                    log::error!("searxng response was not 200 - status code = {}",res.status());
-                    return Err(
-                        McpError::internal_error("could not complete web_search", None)
+                    return self.log_error(
+                        McpError::internal_error("could not complete web_search", None),
+                        Some(
+                            format!(
+                                "searxng response was not 200 - status code = {}",res.status()
+                            )
+                        )
                     )
                 }
             },
-            Err(e) => {
-                log::error!("searxng request was unsuccessful {e}");
-                return Err(
-                    McpError::internal_error("could not complete web_search", None)
+            Err(e) => return self.log_error(
+                McpError::internal_error("could not complete web_search", None),
+                Some(
+                    format!("searxng request was unsuccessful {e}")
                 )
-            }
+            ) 
         };
 
         log::info!("creating searxng results");
@@ -250,14 +270,17 @@ impl WebSearch  {
         }
         let response = match Content::json(search_results) {
             Ok(json) => json,
-            Err(e) => {
-                log::error!("could not convert search results to callToolResult\n{}",e);
-                return Err(
-                    McpError::internal_error("could not complete web_search", None)
-                )
-            }
+            Err(e) => return self.log_error(
+                McpError::internal_error("could not complete web_search", None),
+                Some(
+                    format!(
+                        "could not convert search results to callToolResult\n{}",
+                        e
+                    )
+                ) 
+            )
         };
-
+        
         Ok(
             CallToolResult::success(
                 vec![
@@ -283,12 +306,16 @@ impl WebSearch  {
 
         let session_uuid = match Uuid::parse_str(session_uuid.as_str()) {
             Ok(u) => u,
-            Err(e) => {
-                log::error!("could not parse uuid from session_uuid: {}\n{}", session_uuid, e);
-                return Err(
-                    McpError::invalid_request("valid session_uuid is required", None)
+            Err(e) => return self.log_error(
+                McpError::invalid_request("valid session_uuid is required", None),
+                Some(
+                    format!(
+                        "could not parse uuid from session_uuid: {}\n{}", 
+                        session_uuid, 
+                        e
+                    )
                 )
-            }
+            )
         };
         log::debug!("session_uuid: {}\tid: {}\n", session_uuid, id);
 
@@ -320,12 +347,17 @@ impl WebSearch  {
             
             let url = match reqwest::Url::parse(&target.url) {
                 Ok(u) => u,
-                Err(e) => {
-                    log::error!("Could not parse url from search result:{:#?}\n{}",target, e);
-                    return Err(
-                        McpError::internal_error("unable to parse url", None)
-                    )
-                }
+                Err(e) => return self.log_error(
+                    McpError::internal_error("unable to parse url", None), 
+                    Some(
+                        format!(
+                            "Could not parse url from search result:{:#?}\n{}",
+                            target, 
+                            e
+                        )
+                    ) 
+                )
+
             };
 
             let content: String = match self.r_client 
@@ -340,26 +372,29 @@ impl WebSearch  {
                         if response.status().is_success() {
                             match response.text().await {
                                 Ok(text) => text,
-                                Err(e) => {
-                                    log::error!("could not parse response text for url: {}\n{}", target.url,e);
-                                    return Err(
-                                        McpError::internal_error(format!("could not fetch content of url: {}",target.url), None)
+                                Err(e) => return self.log_error(
+                                    McpError::internal_error(
+                                        format!("could not fetch content of url: {}",target.url), 
+                                        None
+                                    ), 
+                                    Some(
+                                        format!("could not parse response text for url: {}\n{}", target.url,e)
                                     )
-                                }
+                                )
                             }
                         }
                         else {
                             return Err(
-                                McpError::invalid_request(format!("fetching url content was unsuccessful. status_code: {}", response.status()), None)
+                                McpError::invalid_request(
+                                    format!("fetching url content was unsuccessful. status_code: {}", response.status()), 
+                                    None
+                                )
                             )
                         }
                     },
-                    Err(e) => {
-                        log::error!("could not get response from url {}\n{}",target.url, e);
-                        return Err(
-                            McpError::internal_error(format!("could not fetch content of url: {}",target.url), None)
-                        )
-                    }
+                    Err(e) => return self.log_error(
+                        McpError::internal_error(format!("could not fetch content of url: {}",target.url), None),
+                        Some(format!("could not get response from url {}\n{}",target.url, e)))
                 };
                 
                 Ok(
@@ -373,9 +408,9 @@ impl WebSearch  {
                     )
                 )
         }else{
-            log::info!("no session_uuid was found in app state for {}", session_uuid);
-            return Err(
-                McpError::invalid_request("session_uuid not found in app state. cannot fetch url", None)
+            return self.log_error(
+                McpError::invalid_request("session_uuid not found in app state. cannot fetch url", None), 
+                Some(format!("no session_uuid was found in app state for {}", session_uuid))
             )
         }
     }
@@ -442,3 +477,5 @@ impl ServerHandler for WebSearch {
         Ok(self.get_info())
     }
 }
+
+impl LogError for WebSearch {}
