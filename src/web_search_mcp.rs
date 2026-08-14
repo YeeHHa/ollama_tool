@@ -1,7 +1,7 @@
 use std::{
-    any::Any, collections::HashMap, env, sync::Arc
+    any::Any, collections::HashMap, env, fs, io::Read, sync::Arc
 };
-use axum::http::response;
+use axum::http::{request::Builder, response};
 use uuid::Uuid;
 use rmcp::{
     ErrorData as McpError,
@@ -118,18 +118,72 @@ impl WebSearch  {
             }
         };
 
+        let mut ca_cert: Option<String> = match env::var("CA_PATH") {
+            Ok(ca) => Some(ca),
+            Err(e) => {
+                log::warn!("CA_PATH env variable not set. using local CAs {}", e);
+                None
+            }
+        };
 
-        let client = match reqwest::ClientBuilder::new()
-            .user_agent(user_agent)
-            .build() 
-            {
+
+
+        let builder = match ca_cert {
+            Some(ca) => {
+                log::debug!("adding local CA cert to client CA location:{}", ca);
+            
+            //read CA cert
+            //build cert struct from reqwest
+            //pass to builder 
+
+                match fs::File::open(ca) {
+                    Ok(mut ca_file) => {
+                            log::debug!("got bytes from CA file");
+                            let mut bytes = vec![];
+
+                            ca_file.read_to_end(&mut bytes).unwrap_or_default();
+
+                            match reqwest::Certificate::from_pem(&mut bytes)  {
+                                Ok(pem) => {
+                                    log::debug!("reqwest Certificate created");
+                                    log::info!("added CA cert  to reqwest client");
+                                    let cert = vec![pem];
+                                    reqwest::ClientBuilder::new()
+                                        .user_agent(user_agent)
+                                        .tls_certs_merge(cert)
+                                    //let client = builder.build().unwrap();
+
+                                },
+                                Err(e) => {
+                                    log::error!("could not create Certificate from\n{}", e);
+                                    log::warn!("local CA will not be added to client");
+                                    reqwest::ClientBuilder::new()
+                                        .user_agent(user_agent)
+                                }
+                            }
+                    },
+                    Err(e) => {
+                        log::warn!("Could not read CA file \nerror: {}",  e);
+                        log::warn!("local CA will not be added to client");
+                        reqwest::ClientBuilder::new()
+                            .user_agent(user_agent)
+                    }
+                }
+            },
+            None => reqwest::ClientBuilder::new().user_agent(user_agent)
+                
+        };
+
+                     
+
+        let client = match builder.build() {
                 Ok(c) => c,
                 Err(e) => {
                     log::error!("could not build reqwest client for websearch mcp server\n{}",e);
                     panic!("unable to continue with out reqwest client");
                 }
         };
-                
+
         Self {
             tool_router: Self::tool_router(),
             processor: Arc::new(Mutex::new(OperationProcessor::new())),
